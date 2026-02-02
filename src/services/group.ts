@@ -12,6 +12,7 @@ export interface Group {
   banner_url?: string;
   start_date?: string;
   end_date?: string;
+  club_id?: string;
 }
 
 export interface GroupMember {
@@ -34,7 +35,11 @@ export const groupService = {
     banner_url?: string;
     start_date?: Date;
     end_date?: Date;
+    club_id?: string;
   }): Promise<Group> {
+    // DEBUG
+    console.log('[GroupService] creating group with data:', JSON.stringify(data));
+
     // 1. Create unique code (simple random string)
     const inviteCode = '#' + Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -46,9 +51,10 @@ export const groupService = {
         invite_code: inviteCode,
         created_by: data.userId,
         type: data.type,
-        banner_url: data.banner_url,
+        banner_url: data.banner_url || null, // Ensure null if empty string
         start_date: data.start_date?.toISOString(),
         end_date: data.end_date?.toISOString(),
+        club_id: data.club_id,
       })
       .select()
       .single();
@@ -73,32 +79,39 @@ export const groupService = {
   /**
    * Upload group banner image
    */
+  /**
+  * Upload group banner image
+  */
   async uploadGroupBanner(fileUri: string): Promise<string> {
-    const fileName = `banner-${Date.now()}.jpg`;
-    const filePath = `${fileName}`;
+    try {
+      const fileName = `banner-${Date.now()}.jpg`;
+      const filePath = `${fileName}`;
 
-    const formData = new FormData();
-    // @ts-ignore
-    formData.append('file', {
-      uri: fileUri,
-      name: fileName,
-      type: 'image/jpeg',
-    });
+      // Nova abordagem sem FileSystem (SDK 54+ friendly)
+      const response = await fetch(fileUri);
+      const arrayBuffer = await response.arrayBuffer();
 
-    const { data, error } = await supabase.storage
-      .from('group-banners')
-      .upload(filePath, formData, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
+      const { data, error } = await supabase.storage
+        .from('group-banners')
+        .upload(filePath, arrayBuffer, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
 
-    if (error) throw error;
+      if (error) {
+        console.error('[GroupService] Upload Error:', error);
+        throw error;
+      }
 
-    const { data: urlData } = supabase.storage
-      .from('group-banners')
-      .getPublicUrl(data.path);
+      const { data: urlData } = supabase.storage
+        .from('group-banners')
+        .getPublicUrl(data.path);
 
-    return urlData.publicUrl;
+      return urlData.publicUrl;
+    } catch (err) {
+      console.error('[GroupService] Upload Exception:', err);
+      throw err;
+    }
   },
 
   /**
@@ -136,7 +149,7 @@ export const groupService = {
       .from('group_members')
       .select(`
             group:groups (
-                id, name, description, invite_code, created_by, created_at, type, banner_url, start_date, end_date
+                id, name, description, invite_code, created_by, created_at, type, banner_url, start_date, end_date, club_id
             )
         `)
       .eq('user_id', userId);

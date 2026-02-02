@@ -19,16 +19,28 @@ export const CreateCommunityGroupScreen = ({ navigation }: Props) => {
   const [description, setDescription] = useState('');
 
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      // @ts-ignore: MediaType is the new standard, ignoring type mismatch if old types
-      mediaTypes: ImagePicker.MediaType.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 0.8,
-    });
+    // 1. Pedir permissão explicitamente
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (!result.canceled) {
-      setBannerUri(result.assets[0].uri);
+    if (status !== 'granted') {
+      Alert.alert('Permissão necessária', 'Precisamos de acesso à galeria para escolher a capa.');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Syntax moderna
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setBannerUri(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.error("Erro ao abrir galeria:", e);
+      Alert.alert("Erro", "Não foi possível abrir a galeria.");
     }
   };
 
@@ -44,17 +56,28 @@ export const CreateCommunityGroupScreen = ({ navigation }: Props) => {
         uploadedBannerUrl = await groupService.uploadGroupBanner(bannerUri);
       }
 
-      await groupService.createGroup({
+      const newGroup = await groupService.createGroup({
         name,
         description,
         userId: user.id,
-        type: 'COMMUNITY', // Hardcoded as COMMUNITY
+        type: 'COMMUNITY',
         banner_url: uploadedBannerUrl,
-        // No dates for community
       });
 
       Alert.alert('Sucesso', 'Comunidade criada!', [
-        { text: 'OK', onPress: () => navigation.navigate('Groups') }
+        {
+          text: 'OK',
+          onPress: () => {
+            // Reset stack to: Groups -> Detail
+            navigation.reset({
+              index: 1,
+              routes: [
+                { name: 'Groups' },
+                { name: 'GroupDetail', params: { group: newGroup } },
+              ],
+            });
+          }
+        }
       ]);
     } catch (error: any) {
       console.error(error);

@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
-import { Game } from '../types/game';
+// @ts-ignore: Legacy import for SDK 52+ compatibility to avoid readAsStringAsync deprecation error
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode } from 'base64-arraybuffer';
 
 export interface CheckInPayload {
   userId: string;
@@ -18,34 +20,34 @@ export const checkinService = {
     try {
       console.log('[CheckIn] Iniciando upload da foto...');
 
-      // 1. Upload Photo
-      const formData = new FormData();
-      const fileName = `checkin-${userId}-${gameId}.jpg`;
-      const filePath = `${fileName}`;
-
-      // @ts-ignore
-      formData.append('file', {
-        uri: photoUri,
-        name: fileName,
-        type: 'image/jpeg',
+      // 1. READ FILE AS BASE64 (Fixes FormData RLS issues in RN)
+      const base64 = await FileSystem.readAsStringAsync(photoUri, {
+        encoding: 'base64',
       });
 
+      const fileName = `checkin-${userId}-${gameId}-${Date.now()}.jpg`;
+      const contentType = 'image/jpeg';
+
+      // 2. Upload using ArrayBuffer
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('checkin-photos')
-        .upload(filePath, formData, {
-          contentType: 'image/jpeg',
+        .upload(fileName, decode(base64), {
+          contentType,
           upsert: true,
         });
 
-      if (uploadError) throw new Error('Falha no upload da foto: ' + uploadError.message);
+      if (uploadError) {
+        console.error('[CheckIn] Upload Error Details:', uploadError);
+        throw new Error('Falha no upload da foto: ' + uploadError.message);
+      }
+
+      console.log('[CheckIn] Foto enviada com sucesso:', uploadData.path);
 
       const { data: urlData } = supabase.storage
         .from('checkin-photos')
         .getPublicUrl(uploadData.path);
 
-      console.log('[CheckIn] Foto enviada. Criando registro no banco...');
-
-      // 2. Insert Check-in Record
+      // 3. Insert Check-in Record
       const { data, error } = await supabase
         .from('checkins')
         .insert({
@@ -60,7 +62,6 @@ export const checkinService = {
         .single();
 
       if (error) {
-        // Check for duplicate constraint (Error 23505 in Postgres)
         if (error.code === '23505') {
           throw new Error('Você já fez check-in neste jogo!');
         }

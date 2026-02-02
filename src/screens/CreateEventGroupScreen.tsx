@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Image, ActivityIndicator, Alert, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Image, ActivityIndicator, Alert, Modal, FlatList } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { theme } from '../theme/theme';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { groupService } from '../services/group';
+import { clubService } from '../services/club';
 import { useAuth } from '../contexts/AuthContext';
+import { Club } from '../types/club';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateEventGroup'>;
 
@@ -20,17 +22,47 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      // @ts-ignore: MediaType is the new standard, ignoring type mismatch if old types
-      mediaTypes: ImagePicker.MediaType.Images,
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 0.8,
-    });
+  // Club Selection State
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [selectedClub, setSelectedClub] = useState<Club | null>(null);
+  const [clubModalVisible, setClubModalVisible] = useState(false);
 
-    if (!result.canceled) {
-      setBannerUri(result.assets[0].uri);
+  useEffect(() => {
+    fetchClubs();
+  }, []);
+
+  const fetchClubs = async () => {
+    try {
+      const data = await clubService.getClubs();
+      setClubs(data);
+    } catch (error) {
+      console.error('Error fetching clubs:', error);
+    }
+  };
+
+  const pickImage = async () => {
+    // 1. Pedir permissão explicitamente
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (status !== 'granted') {
+      Alert.alert('Permissão necessária', 'Precisamos de acesso à galeria para escolher a capa.');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Syntax moderna
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setBannerUri(result.assets[0].uri);
+      }
+    } catch (e) {
+      console.error("Erro ao abrir galeria:", e);
+      Alert.alert("Erro", "Não foi possível abrir a galeria.");
     }
   };
 
@@ -48,6 +80,7 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
   const handleSubmit = async () => {
     if (!user) return;
     if (!name) return Alert.alert('Erro', 'Nome do evento é obrigatório');
+    if (!selectedClub) return Alert.alert('Erro', 'Selecione um clube do coração para o evento');
     if (!startDate || !validateDate(startDate)) return Alert.alert('Erro', 'Data de início inválida (DD/MM/AAAA)');
     if (!endDate || !validateDate(endDate)) return Alert.alert('Erro', 'Data final inválida (DD/MM/AAAA)');
 
@@ -66,7 +99,7 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
         throw new Error('A data final deve ser depois da data de início.');
       }
 
-      await groupService.createGroup({
+      const newGroup = await groupService.createGroup({
         name,
         description,
         userId: user.id,
@@ -74,10 +107,22 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
         banner_url: uploadedBannerUrl,
         start_date: start,
         end_date: end,
+        club_id: selectedClub.id,
       });
 
       Alert.alert('Sucesso', 'Evento criado com sucesso!', [
-        { text: 'OK', onPress: () => navigation.navigate('Groups') }
+        {
+          text: 'OK',
+          onPress: () => {
+            navigation.reset({
+              index: 1,
+              routes: [
+                { name: 'Groups' },
+                { name: 'GroupDetail', params: { group: newGroup } },
+              ],
+            });
+          }
+        }
       ]);
     } catch (error: any) {
       console.error(error);
@@ -88,17 +133,11 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
   };
 
   const handleDateChange = (text: string, setter: (val: string) => void) => {
-    // Simple mask for DD/MM/YYYY
     let cleaned = text.replace(/\D/g, '');
     if (cleaned.length > 8) cleaned = cleaned.substring(0, 8);
-
     let formatted = cleaned;
-    if (cleaned.length > 2) {
-      formatted = `${cleaned.substring(0, 2)}/${cleaned.substring(2)}`;
-    }
-    if (cleaned.length > 4) {
-      formatted = `${formatted.substring(0, 5)}/${formatted.substring(5)}`;
-    }
+    if (cleaned.length > 2) formatted = `${cleaned.substring(0, 2)}/${cleaned.substring(2)}`;
+    if (cleaned.length > 4) formatted = `${formatted.substring(0, 5)}/${formatted.substring(5)}`;
     setter(formatted);
   };
 
@@ -124,6 +163,20 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
             </View>
           )}
         </TouchableOpacity>
+
+        {/* CLUB SELECTION */}
+        <View style={styles.formGroup}>
+          <Text style={styles.label}>Clube do Coração *</Text>
+          <TouchableOpacity
+            style={styles.selectorButton}
+            onPress={() => setClubModalVisible(true)}
+          >
+            <Text style={[styles.selectorText, !selectedClub && { color: '#666' }]}>
+              {selectedClub ? selectedClub.name : 'Selecione o clube...'}
+            </Text>
+            <Text style={{ color: 'white' }}>▼</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* FORM */}
         <View style={styles.formGroup}>
@@ -191,6 +244,42 @@ export const CreateEventGroupScreen = ({ navigation }: Props) => {
         </TouchableOpacity>
 
       </ScrollView>
+
+      {/* CLUB SELECTION MODAL */}
+      <Modal
+        visible={clubModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setClubModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Selecione o Clube</Text>
+              <TouchableOpacity onPress={() => setClubModalVisible(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={clubs}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.clubItem}
+                  onPress={() => {
+                    setSelectedClub(item);
+                    setClubModalVisible(false);
+                  }}
+                >
+                  <Text style={styles.clubName}>{item.name}</Text>
+                  {item.short_name && <Text style={styles.clubShort}>{item.short_name}</Text>}
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 };
@@ -269,6 +358,20 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.inputBorder,
     fontSize: 16,
   },
+  selectorButton: {
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.m,
+    borderRadius: theme.borderRadius.s,
+    borderWidth: 1,
+    borderColor: theme.colors.inputBorder,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  selectorText: {
+    color: 'white',
+    fontSize: 16,
+  },
   textArea: {
     height: 100,
     textAlignVertical: 'top',
@@ -292,5 +395,53 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: theme.colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '60%',
+    padding: theme.spacing.m,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.m,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.inputBorder,
+    paddingBottom: theme.spacing.s,
+  },
+  modalTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    color: 'white',
+    fontSize: 24,
+    padding: 4,
+  },
+  clubItem: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.inputBorder,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  clubName: {
+    color: 'white',
+    fontSize: 16,
+  },
+  clubShort: {
+    color: theme.colors.textSecondary,
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

@@ -120,7 +120,7 @@ export const CheckInScreen = ({ route, navigation }: CheckInScreenProps) => {
       await refreshUserData();
 
       Alert.alert('GOLAÇO!', 'Check-in realizado! +10 PONTOS', [
-        { text: 'OK', onPress: () => navigation.navigate('Home', { username: user.full_name }) } // Go back to Home
+        { text: 'OK', onPress: () => navigation.goBack() } // Go back to previous screen
       ]);
 
     } catch (error: any) {

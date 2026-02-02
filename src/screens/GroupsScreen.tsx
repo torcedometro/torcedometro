@@ -57,7 +57,12 @@ export const GroupsScreen = ({ navigation, route }: any) => {
     if (!groupName || !user) return;
     try {
       setSubmitting(true);
-      await groupService.createGroup(groupName, '', user.id);
+      await groupService.createGroup({
+        name: groupName,
+        description: '',
+        userId: user.id,
+        type: 'COMMUNITY' // Modal básica cria comunidade
+      });
       Alert.alert('Sucesso', 'Grupo criado!');
       setModalVisible(false);
       setGroupName('');
@@ -101,7 +106,17 @@ export const GroupsScreen = ({ navigation, route }: any) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8 }}>
+        <TouchableOpacity
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              // @ts-ignore
+              navigation.navigate('Tabs');
+            }
+          }}
+          style={{ padding: 8 }}
+        >
           <Text style={{ color: 'white', fontSize: 20 }}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Minhas Comunidades</Text>
